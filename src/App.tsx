@@ -212,6 +212,7 @@ const App = () => {
           selectedNode={selectedNode} 
           setNodes={setNodes} 
           selectedPacket={selectedPacket}
+          nodes={nodes}
         />
       </div>
     </SimulationProvider>

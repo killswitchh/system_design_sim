@@ -6,15 +6,21 @@ interface PropertiesPanelProps {
   selectedNode: Node | null;
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>;
   selectedPacket: Packet | null;
+  nodes: Node[];
 }
 
-export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: PropertiesPanelProps) => {
+export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket, nodes }: PropertiesPanelProps) => {
+   // Get live node for real-time updates
+  const liveNode = selectedNode ? nodes.find(n => n.id === selectedNode.id) : null;
+  const displayNode = liveNode || selectedNode;
   const [label, setLabel] = useState('');
   const [algorithm, setAlgorithm] = useState('');
   const [dbType, setDbType] = useState('');
   const [rps, setRps] = useState(1);
   const [unit, setUnit] = useState('second');
   const [color, setColor] = useState('#60a5fa');
+  const [healthCheckInterval, setHealthCheckInterval] = useState(5);
+  const [isHealthy, setIsHealthy] = useState(true);
   const [width, setWidth] = useState(288);
   const [isResizing, setIsResizing] = useState(false);
   const [expandedLog, setExpandedLog] = useState<string | null>(null);
@@ -29,6 +35,8 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
       setRps(selectedNode.data.rps || 1);
       setUnit(selectedNode.data.unit || 'second');
       setColor(selectedNode.data.color || '#60a5fa');
+      setHealthCheckInterval(selectedNode.data.healthCheckInterval || 5);
+      setIsHealthy(selectedNode.data.isHealthy !== false);
       setHasChanges(false);
       setExpandedLog(null);
     }
@@ -76,6 +84,8 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
               rps,
               unit,
               color,
+              healthCheckInterval,
+              isHealthy,
             },
           };
         }
@@ -183,20 +193,74 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
         </div>
 
         {selectedNode.type === 'loadBalancer' && (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Algorithm</label>
+              <select
+                value={algorithm}
+                onChange={(e) => {
+                  setAlgorithm(e.target.value);
+                  setHasChanges(true);
+                }}
+                className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="Round Robin">Round Robin</option>
+                <option value="Least Connections">Least Connections</option>
+                <option value="Random">Random</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-medium text-gray-400 mb-1">Health Check Interval</label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="60"
+                  value={healthCheckInterval}
+                  onChange={(e) => {
+                    setHealthCheckInterval(parseInt(e.target.value));
+                    setHasChanges(true);
+                  }}
+                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
+                />
+                <span className="text-xs text-gray-400 whitespace-nowrap">seconds</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {selectedNode.type === 'instance' && (
           <div>
-            <label className="block text-xs font-medium text-gray-400 mb-1">Algorithm</label>
-            <select
-              value={algorithm}
-              onChange={(e) => {
-                setAlgorithm(e.target.value);
-                setHasChanges(true);
-              }}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-white focus:outline-none focus:border-blue-500"
-            >
-              <option value="Round Robin">Round Robin</option>
-              <option value="Least Connections">Least Connections</option>
-              <option value="Random">Random</option>
-            </select>
+            <label className="block text-xs font-medium text-gray-400 mb-2">Health Status</label>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => {
+                  setIsHealthy(true);
+                  setHasChanges(true);
+                }}
+                className={`flex-1 py-2 px-3 rounded text-sm font-medium transition-colors ${
+                  isHealthy
+                    ? 'bg-green-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                ✓ Healthy
+              </button>
+              <button
+                onClick={() => {
+                  setIsHealthy(false);
+                  setHasChanges(true);
+                }}
+                className={`flex-1 py-2 px-3 rounded text-sm font-medium transition-colors ${
+                  !isHealthy
+                    ? 'bg-red-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                ✗ Unhealthy
+              </button>
+            </div>
           </div>
         )}
 
@@ -268,13 +332,18 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
           </div>
         )}
         
-        {/* Request Log for processing nodes */}
+        {/* Component Log for processing nodes */}
         {(selectedNode.type === 'loadBalancer' || selectedNode.type === 'instance' || selectedNode.type === 'database') && (
           <div>
-            <label className="block text-xs font-medium text-gray-400 mb-2">Request Log</label>
-            <div className="bg-gray-800 rounded p-2 max-h-60 overflow-y-auto space-y-1">
-              {selectedNode.data.requestLog && selectedNode.data.requestLog.length > 0 ? (
-                selectedNode.data.requestLog.map((log: any) => {
+            <label className="block text-xs font-medium text-gray-400 mb-2">Component Log</label>
+            <div 
+              className="bg-gray-800 rounded p-2 max-h-60 overflow-y-auto space-y-1"
+              onClick={(e) => {
+                e.currentTarget.scrollTop = e.currentTarget.scrollHeight;
+              }}
+            >
+              {displayNode?.data.componentLog && displayNode.data.componentLog.length > 0 ? (
+                displayNode.data.componentLog.map((log: any) => {
                   const isExpanded = expandedLog === log.id;
                   
                   return (
@@ -291,7 +360,7 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
                           {new Date(log.timestamp).toLocaleTimeString()}
                         </span>
                         <span className="text-gray-300 flex-1">
-                          from {log.source}
+                          {log.details || `from ${log.source}`}
                         </span>
                         <span className="text-gray-500">{isExpanded ? '▼' : '▶'}</span>
                       </div>
@@ -327,7 +396,7 @@ export const PropertiesPanel = ({ selectedNode, setNodes, selectedPacket }: Prop
                   );
                 })
               ) : (
-                <div className="text-xs text-gray-500 text-center py-2">No requests yet</div>
+                <div className="text-xs text-gray-500 text-center py-2">No logs yet</div>
               )}
             </div>
           </div>

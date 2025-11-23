@@ -36,7 +36,7 @@ const NodeWrapper = ({
           : isError
             ? 'border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.5)] bg-gray-900 animate-wiggle'
             : isProcessing
-              ? `bg-gray-800 scale-[1.02]`
+              ? `bg-gray-800`
               : isDimmed
                 ? 'border-gray-800 bg-gray-950 opacity-40 grayscale'
                 : 'border-gray-700 bg-gray-900 hover:border-gray-600'
@@ -81,19 +81,21 @@ export const LoadBalancerNode = ({ data, selected }: NodeProps) => (
   <NodeWrapper type="Load Balancer" label="Nginx / HAProxy" selected={selected} data={data}>
     <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
       <span>Algorithm</span>
-      <span className="text-gray-300">Round Robin</span>
+      <span className="text-gray-300">{data.algorithm || 'Round Robin'}</span>
     </div>
   </NodeWrapper>
 );
 
 export const InstanceNode = ({ data, selected }: NodeProps) => (
-  <NodeWrapper type="Instance" label="EC2 / Droplet" selected={selected} data={data}>
+  <NodeWrapper type="Instance" label="Server Instance" selected={selected} data={data}>
     <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
       <span>Status</span>
-      <span className="text-green-400 flex items-center gap-1">
-        <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
-        Healthy
-      </span>
+      <div className="flex items-center gap-2">
+        <div className={`w-2 h-2 rounded-full ${data.isHealthy !== false ? 'bg-green-400' : 'bg-red-400'}`} />
+        <span className={`font-medium ${data.isHealthy !== false ? 'text-green-400' : 'text-red-400'}`}>
+          {data.isHealthy !== false ? 'Healthy' : 'Unhealthy'}
+        </span>
+      </div>
     </div>
   </NodeWrapper>
 );
@@ -101,8 +103,8 @@ export const InstanceNode = ({ data, selected }: NodeProps) => (
 export const DatabaseNode = ({ data, selected }: NodeProps) => (
   <NodeWrapper type="Database" label="PostgreSQL / Redis" selected={selected} data={data}>
     <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
-      <span>Connections</span>
-      <span className="text-gray-300">Active</span>
+      <span>Type</span>
+      <span className="text-gray-300">{data.dbType || 'PostgreSQL'}</span>
     </div>
   </NodeWrapper>
 );
