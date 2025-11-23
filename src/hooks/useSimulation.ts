@@ -35,6 +35,7 @@ export const useSimulation = (
   useEffect(() => {
     const healthCheckInterval = setInterval(() => {
       const now = Date.now();
+      const HEALTH_CHECK_TIMEOUT = 2000; // 2 seconds timeout
       
       nodesRef.current.forEach(node => {
         if (node.type === 'loadBalancer') {
@@ -53,19 +54,56 @@ export const useSimulation = (
               return targetNode?.type === 'instance';
             });
             
-            // Send health check packet to each instance
+            // Send health check packet to each instance and set timeout
             instanceEdges.forEach(edge => {
+              const healthCheckId = `${node.id}-${edge.target}-${now}`;
+              
               setPackets(current => [...current, {
-                id: Math.random().toString(36).substr(2, 9),
+                id: healthCheckId,
                 sourceId: node.id,
                 targetId: edge.target,
                 progress: 0,
                 edgeId: edge.id,
                 type: 'health-check',
-                headers: { 'X-Health-Check': 'true' },
+                headers: { 'X-Health-Check': 'true', 'X-Health-Check-ID': healthCheckId },
                 body: 'ping',
                 color: '#f59e0b', // Orange for health checks
               }]);
+              
+              // Set timeout to mark instance as unhealthy if no response
+              setTimeout(() => {
+                setNodes(nds => nds.map(n => {
+                  if (n.id === node.id) {
+                    const healthMap = n.data.instanceHealthMap || {};
+                    const hasResponded = healthMap[`${edge.target}-${healthCheckId}`];
+                    
+                    // If no response received, mark as unhealthy
+                    if (!hasResponded) {
+                      const updatedHealthMap = { ...healthMap };
+                      delete updatedHealthMap[`${edge.target}-${healthCheckId}`]; // Clean up check ID
+                      updatedHealthMap[edge.target] = false; // Mark instance as unhealthy
+                      
+                      const logEntry = {
+                        id: Math.random().toString(36).substr(2, 9),
+                        timestamp: Date.now(),
+                        action: 'HEALTH_CHECK_TIMEOUT',
+                        details: `Instance ${edge.target} failed health check (timeout)`,
+                        color: '#ef4444', // Red for timeout
+                      };
+                      const currentLog = n.data.componentLog || [];
+                      return { 
+                        ...n, 
+                        data: { 
+                          ...n.data, 
+                          instanceHealthMap: updatedHealthMap,
+                          componentLog: [logEntry, ...currentLog].slice(0, 100) 
+                        } 
+                      };
+                    }
+                  }
+                  return n;
+                }));
+              }, HEALTH_CHECK_TIMEOUT);
             });
             
             // Log health check initiation
@@ -188,36 +226,20 @@ export const useSimulation = (
                 
                 // If healthy, send response back to load balancer
                 if (isHealthy) {
-                  // Send response on the same edge, but traveling backwards (progress goes from 100 to 0)
-                  setTimeout(() => {
-                    setPackets(current => [...current, {
-                      id: Math.random().toString(36).substr(2, 9),
-                      sourceId: p.targetId,  // Instance
-                      targetId: p.sourceId,  // Load balancer
-                      progress: 100,  // Start at 100 (at instance)
-                      edgeId: p.edgeId,  // Same edge
-                      type: 'health-check-response',
-                      headers: { 'X-Health-Check-Response': 'OK' },
-                      body: 'pong',
-                      color: '#10b981',
-                    }]);
-                  }, 100);
-                } else {
-                  // Unhealthy - log failure at load balancer
-                  setNodes(nds => nds.map(n => {
-                    if (n.id === p.sourceId) {
-                      const logEntry = {
-                        id: Math.random().toString(36).substr(2, 9),
-                        timestamp: Date.now(),
-                        action: 'HEALTH_CHECK_FAILED',
-                        details: `Instance ${p.targetId} is unhealthy`,
-                        color: '#ef4444',
-                      };
-                      const currentLog = n.data.componentLog || [];
-                      return { ...n, data: { ...n.data, componentLog: [logEntry, ...currentLog].slice(0, 100) } };
-                    }
-                    return n;
-                  }));
+                  setPackets(current => [...current, {
+                    id: Math.random().toString(36).substr(2, 9),
+                    sourceId: targetNode.id,
+                    targetId: p.sourceId,
+                    progress: 100, // Start at instance (100%) and move back to LB (0%)
+                    edgeId: p.edgeId, // Use same edge, traveling backwards
+                    type: 'health-check-response',
+                    headers: { 
+                      'X-Health-Check': 'true',
+                      'X-Health-Check-ID': p.headers['X-Health-Check-ID'] || p.id
+                    },
+                    body: 'pong',
+                    color: '#10b981', // Green for response
+                  }]);
                 }
                 
                 return; // Don't process health checks further
@@ -225,8 +247,21 @@ export const useSimulation = (
               
               // Handle health check responses
               if (p.type === 'health-check-response' && targetNode.type === 'loadBalancer') {
+                const healthCheckId = p.headers['X-Health-Check-ID'];
+                
                 setNodes(nds => nds.map(n => {
                   if (n.id === targetNode.id) {
+                    const healthMap = n.data.instanceHealthMap || {};
+                    const updatedHealthMap = { ...healthMap };
+                    
+                    // Mark this specific check as responded
+                    if (healthCheckId) {
+                      updatedHealthMap[`${p.sourceId}-${healthCheckId}`] = true;
+                    }
+                    
+                    // Mark instance as healthy
+                    updatedHealthMap[p.sourceId] = true;
+                    
                     const logEntry = {
                       id: Math.random().toString(36).substr(2, 9),
                       timestamp: Date.now(),
@@ -235,7 +270,14 @@ export const useSimulation = (
                       color: '#10b981',
                     };
                     const currentLog = n.data.componentLog || [];
-                    return { ...n, data: { ...n.data, componentLog: [logEntry, ...currentLog].slice(0, 100) } };
+                    return { 
+                      ...n, 
+                      data: { 
+                        ...n.data, 
+                        instanceHealthMap: updatedHealthMap,
+                        componentLog: [logEntry, ...currentLog].slice(0, 100) 
+                      } 
+                    };
                   }
                   return n;
                 }));
@@ -304,11 +346,23 @@ export const useSimulation = (
                             return tNode?.type === nextTargetType;
                         });
 
-                        // Filter unhealthy instances
+                        // Filter unhealthy instances based on LB's health map
                         if (targetNode.type === 'loadBalancer' && nextTargetType === 'instance') {
+                          const healthMap = targetNode.data.instanceHealthMap || {};
                           validEdges = validEdges.filter(e => {
                             const tNode = nodes.find(n => n.id === e.target);
-                            return tNode?.data.isHealthy !== false;
+                            // Check LB's health map first, fallback to instance's isHealthy, default to true
+                            const isHealthyInMap = healthMap[e.target];
+                            const instanceHealth = tNode?.data.isHealthy;
+                            
+                            // If LB has no health data yet, use instance's health status
+                            // This allows initial traffic before first health check
+                            if (isHealthyInMap === undefined) {
+                              return instanceHealth !== false;
+                            }
+                            
+                            // Use LB's tracked health status
+                            return isHealthyInMap === true;
                           });
                         }
 
